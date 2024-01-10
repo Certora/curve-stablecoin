@@ -97,10 +97,10 @@ struct DetailedTrade:
     admin_fee: uint256
 
 
-BORROWED_TOKEN: immutable(ERC20)    # x
-BORROWED_PRECISION: immutable(uint256)
-COLLATERAL_TOKEN: immutable(ERC20)  # y
-COLLATERAL_PRECISION: immutable(uint256)
+BORROWED_TOKEN: public(ERC20)    # x
+BORROWED_PRECISION: public(immutable(uint256))
+COLLATERAL_TOKEN: public(ERC20)  # y
+COLLATERAL_PRECISION: public(immutable(uint256))
 BASE_PRICE: immutable(uint256)
 admin: public(address)
 
@@ -134,7 +134,9 @@ MAX_P_O_CHG: constant(uint256) = 12500 * 10**14  # <= 2**(1/3) - max relative ch
 bands_x: public(HashMap[int256, uint256])
 bands_y: public(HashMap[int256, uint256])
 
-total_shares: HashMap[int256, uint256]
+exp_summary: public(HashMap[int256, uint256])
+
+total_shares: public(HashMap[int256, uint256])
 user_shares: HashMap[address, UserTicks]
 DEAD_SHARES: constant(uint256) = 1000
 
@@ -169,9 +171,9 @@ def __init__(
     @param _price_oracle_contract External price oracle which has price() and price_w() methods
            which both return current price of collateral multiplied by 1e18
     """
-    BORROWED_TOKEN = ERC20(_borrowed_token)
+    self.BORROWED_TOKEN = ERC20(_borrowed_token)
     BORROWED_PRECISION = _borrowed_precision
-    COLLATERAL_TOKEN = ERC20(_collateral_token)
+    self.COLLATERAL_TOKEN = ERC20(_collateral_token)
     COLLATERAL_PRECISION = _collateral_precision
     A = _A
     BASE_PRICE = _base_price
@@ -214,8 +216,8 @@ def set_admin(_admin: address):
     """
     assert self.admin == empty(address)
     self.admin = _admin
-    self.approve_max(BORROWED_TOKEN, _admin)
-    self.approve_max(COLLATERAL_TOKEN, _admin)
+    self.approve_max(self.BORROWED_TOKEN, _admin)
+    self.approve_max(self.COLLATERAL_TOKEN, _admin)
 
 
 @internal
@@ -229,9 +231,9 @@ def sqrt_int(_x: uint256) -> uint256:
 
 
 @external
-@pure
+@view
 def coins(i: uint256) -> address:
-    return [BORROWED_TOKEN.address, COLLATERAL_TOKEN.address][i]
+    return [self.BORROWED_TOKEN.address, self.COLLATERAL_TOKEN.address][i]
 
 
 @internal
@@ -371,39 +373,41 @@ def _p_oracle_up(n: int256) -> uint256:
     power: int256 = -n * LOG_A_RATIO
 
     # ((A - 1) / A) ** n = exp(-n * A / (A - 1)) = exp(-n * LOG_A_RATIO)
-    ## Exp implementation based on solmate's
-    assert power > -42139678854452767551
-    assert power < 135305999368893231589
+#     ## Exp implementation based on solmate's
+#     assert power > -42139678854452767551
+#     assert power < 135305999368893231589
 
-    x: int256 = unsafe_div(unsafe_mul(power, 2**96), 10**18)
+#     x: int256 = unsafe_div(unsafe_mul(power, 2**96), 10**18)
 
-    k: int256 = unsafe_div(
-        unsafe_add(
-            unsafe_div(unsafe_mul(x, 2**96), 54916777467707473351141471128),
-            2**95),
-        2**96)
-    x = unsafe_sub(x, unsafe_mul(k, 54916777467707473351141471128))
+#     k: int256 = unsafe_div(
+#         unsafe_add(
+#             unsafe_div(unsafe_mul(x, 2**96), 54916777467707473351141471128),
+#             2**95),
+#         2**96)
+#     x = unsafe_sub(x, unsafe_mul(k, 54916777467707473351141471128))
 
-    y: int256 = unsafe_add(x, 1346386616545796478920950773328)
-    y = unsafe_add(unsafe_div(unsafe_mul(y, x), 2**96), 57155421227552351082224309758442)
-    p: int256 = unsafe_sub(unsafe_add(y, x), 94201549194550492254356042504812)
-    p = unsafe_add(unsafe_div(unsafe_mul(p, y), 2**96), 28719021644029726153956944680412240)
-    p = unsafe_add(unsafe_mul(p, x), (4385272521454847904659076985693276 * 2**96))
+#     y: int256 = unsafe_add(x, 1346386616545796478920950773328)
+#     y = unsafe_add(unsafe_div(unsafe_mul(y, x), 2**96), 57155421227552351082224309758442)
+#     p: int256 = unsafe_sub(unsafe_add(y, x), 94201549194550492254356042504812)
+#     p = unsafe_add(unsafe_div(unsafe_mul(p, y), 2**96), 28719021644029726153956944680412240)
+#     p = unsafe_add(unsafe_mul(p, x), (4385272521454847904659076985693276 * 2**96))
 
-    q: int256 = x - 2855989394907223263936484059900
-    q = unsafe_add(unsafe_div(unsafe_mul(q, x), 2**96), 50020603652535783019961831881945)
-    q = unsafe_sub(unsafe_div(unsafe_mul(q, x), 2**96), 533845033583426703283633433725380)
-    q = unsafe_add(unsafe_div(unsafe_mul(q, x), 2**96), 3604857256930695427073651918091429)
-    q = unsafe_sub(unsafe_div(unsafe_mul(q, x), 2**96), 14423608567350463180887372962807573)
-    q = unsafe_add(unsafe_div(unsafe_mul(q, x), 2**96), 26449188498355588339934803723976023)
+#     q: int256 = x - 2855989394907223263936484059900
+#     q = unsafe_add(unsafe_div(unsafe_mul(q, x), 2**96), 50020603652535783019961831881945)
+#     q = unsafe_sub(unsafe_div(unsafe_mul(q, x), 2**96), 533845033583426703283633433725380)
+#     q = unsafe_add(unsafe_div(unsafe_mul(q, x), 2**96), 3604857256930695427073651918091429)
+#     q = unsafe_sub(unsafe_div(unsafe_mul(q, x), 2**96), 14423608567350463180887372962807573)
+#     q = unsafe_add(unsafe_div(unsafe_mul(q, x), 2**96), 26449188498355588339934803723976023)
 
-    exp_result: uint256 = shift(
-        unsafe_mul(convert(unsafe_div(p, q), uint256), 3822833074963236453042738258902158003155416615667),
-        unsafe_sub(k, 195))
-    ## End exp
-    assert exp_result > 1000  # dev: limit precision of the multiplier
+#     exp_result: uint256 = shift(
+#         unsafe_mul(convert(unsafe_div(p, q), uint256), 3822833074963236453042738258902158003155416615667),
+#         unsafe_sub(k, 195))
+#     ## End exp
+
+    exp_result: uint256 = self.exp_summary[power]
+
+#     assert exp_result > 1000  # dev: limit precision of the multiplier
     return unsafe_div(self._base_price() * exp_result, 10**18)
-
 
 @internal
 @view
@@ -774,6 +778,8 @@ def withdraw(user: address, frac: uint256) -> uint256[2]:
         x: uint256 = self.bands_x[n]
         y: uint256 = self.bands_y[n]
         ds: uint256 = unsafe_div(frac * user_shares[i], 10**18)  # Can ONLY zero out when frac == 10**18
+        # assert frac >= 10**18 or ds < user_shares[i], "NL summary"
+        # assert frac != 10**18 or ds == user_shares[i], "NL summary"
         user_shares[i] = unsafe_sub(user_shares[i], ds)
         s: uint256 = self.total_shares[n]
         new_shares: uint256 = s - ds
@@ -1066,15 +1072,15 @@ def _exchange(i: uint256, j: uint256, amount: uint256, minmax_amount: uint256, _
     lm: LMGauge = self.liquidity_mining_callback
     collateral_shares: DynArray[uint256, MAX_TICKS_UINT] = []
 
-    in_coin: ERC20 = BORROWED_TOKEN
-    out_coin: ERC20 = COLLATERAL_TOKEN
+    in_coin: ERC20 = self.BORROWED_TOKEN
+    out_coin: ERC20 = self.COLLATERAL_TOKEN
     in_precision: uint256 = BORROWED_PRECISION
     out_precision: uint256 = COLLATERAL_PRECISION
     if i == 1:
         in_precision = out_precision
         in_coin = out_coin
         out_precision = BORROWED_PRECISION
-        out_coin = BORROWED_TOKEN
+        out_coin = self.BORROWED_TOKEN
 
     out: DetailedTrade = empty(DetailedTrade)
     if use_in_amount:
