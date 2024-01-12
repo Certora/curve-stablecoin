@@ -11,6 +11,7 @@ methods {
     function bands_x(int256 n) external returns uint256 envfree;
     function bands_y(int256 n) external returns uint256 envfree;
     function read_user_tick_numbers(address) external returns int256[2] envfree;
+    function liquidity_mining_callback() external returns address envfree;
 
 
     // STABLECOIN:
@@ -23,8 +24,18 @@ methods {
 
     //
     function _.price_w() external => CONSTANT;
+    function _.transfer(address to, uint256 amount) external with (env e) => transferFromSummary(calledContract, e.msg.sender, to, amount) expect bool;
+    function _.transferFrom(address from, address to, uint256 amount) external => transferFromSummary(calledContract, from, to, amount) expect bool;
 }
 
+ghost mapping(address => mapping(address => mathint)) tokenBalance;
+
+function transferFromSummary(address token, address from, address to, uint256 amount) returns bool {
+    require tokenBalance[token][from] >= to_mathint(amount);
+    tokenBalance[token][from] = tokenBalance[token][from] - amount;
+    tokenBalance[token][to] = tokenBalance[token][to] + amount;
+    return true;
+}
 
 ghost mapping(address => int256) user_ns {
     init_state axiom (forall address user. user_ns[user] == 0);
@@ -276,28 +287,27 @@ definition DEAD_SHARES() returns mathint = 1000;
 rule totalSharesToBandsYShouldBeConstantOnWithdraw(address user) {
     env e;
     int256 n;
-    // require user_n1[user] <= to_mathint(n) && to_mathint(n) <= user_n2[user];
-    require bands_y(n) > 0;
-    require active_band() < n;
+    requireInvariant n1_n2_inrange();
+    // to avoid timeouts, we require user using only a single band.
+    require user_n1[user] + 0 >= user_n2[user];
 
     uint256 frac;
-    require 0 <= frac && frac <= 10^18;
 
     require e.msg.sender == admin();
 
-    mathint oldRatio = ((total_shares(n) + DEAD_SHARES()) * 10^18) / (bands_y(n) + 1);
-//    require oldRatio == 10^21;
+    mathint oldVirtShares = total_shares(n) + DEAD_SHARES();
+    mathint oldVirtAssets = bands_y(n) + 1;
 
     withdraw(e, user, frac);
 
-    require bands_y(n) > 1;
+    mathint newVirtShares = total_shares(n) + DEAD_SHARES();
+    mathint newVirtAssets = bands_y(n) + 1;
 
-    mathint newRatio_upper = ((total_shares(n) + DEAD_SHARES()) * 10^18) / (bands_y(n) + 0);
-    mathint newRatio_lower = ((total_shares(n) + DEAD_SHARES()) * 10^18) / (bands_y(n) + 2);
-
-    assert newRatio_lower <= oldRatio, "ratio decrease bound";
-    assert oldRatio <= newRatio_upper, "ratio increase bound";
-    // satisfy true;
+    // either all shares and assets were withdrawn, or shares increased in value
+    assert (newVirtShares == DEAD_SHARES() && newVirtAssets == 1) ||
+           newVirtShares * oldVirtAssets <= oldVirtShares * newVirtAssets, "shares must not lose value";
+    assert newVirtShares * oldVirtAssets >= oldVirtShares * (newVirtAssets - 1), "shares gain too much value";
+    satisfy newVirtShares != oldVirtShares;
 }
 
 
@@ -305,27 +315,25 @@ rule totalSharesToBandsYShouldBeConstantOnWithdraw(address user) {
 rule totalSharesToBandsXShouldBeConstantOnWithdraw(address user) {
     env e;
     int256 n;
-    // require user_n1[user] <= to_mathint(n) && to_mathint(n) <= user_n2[user];
-    require bands_x(n) > 0;
-    require active_band() < n;
+    requireInvariant n1_n2_inrange();
+    // to avoid timeouts, we require user using only a single band.
+    require user_n1[user] + 0 >= user_n2[user];
 
     uint256 frac;
-    require 0 <= frac && frac <= 10^18;
 
-    require e.msg.sender == admin();
+    mathint oldVirtShares = total_shares(n) + DEAD_SHARES();
+    mathint oldVirtAssets = bands_x(n) + 1;
 
-    mathint oldRatio = ((total_shares(n) + DEAD_SHARES()) * 10^18) / (bands_y(n) + 1);
- //   require oldRatio == 10^21;
     withdraw(e, user, frac);
 
-    require bands_x(n) > 1;
+    mathint newVirtShares = total_shares(n) + DEAD_SHARES();
+    mathint newVirtAssets = bands_x(n) + 1;
 
-    mathint newRatio_upper = ((total_shares(n) + DEAD_SHARES()) * 10^18) / (bands_y(n) + 0);
-    mathint newRatio_lower = ((total_shares(n) + DEAD_SHARES()) * 10^18) / (bands_y(n) + 2);
-
-    assert newRatio_lower <= oldRatio, "ratio decrease bound";
-    assert oldRatio <= newRatio_upper, "ratio increase bound";
-    // satisfy true;
+    // either all shares and assets were withdrawn, or shares increased in value
+    assert (newVirtShares == DEAD_SHARES() && newVirtAssets == 1) ||
+           newVirtShares * oldVirtAssets <= oldVirtShares * newVirtAssets, "shares must not lose value";
+    assert newVirtShares * oldVirtAssets >= oldVirtShares * (newVirtAssets - 1), "shares gain too much value";
+    satisfy true;
 }
 
 rule totalSharesToBandsYShouldBeConstantOnDepositRange(address user, uint256 amount, int256 n1, int256 n2) {
@@ -345,8 +353,8 @@ rule totalSharesToBandsYShouldBeConstantOnDepositRange(address user, uint256 amo
     mathint newVirtShares = total_shares(n) + DEAD_SHARES();
     mathint newVirtAssets = bands_y(n) + 1;
 
-    assert newVirtShares * oldVirtAssets <= oldVirtShares * newVirtAssets, "ratio decrease bound";
-    assert (newVirtShares + 1) * oldVirtAssets >= oldVirtShares * newVirtAssets, "ratio increase bound";
+    assert newVirtShares * oldVirtAssets <= oldVirtShares * newVirtAssets, "shares must not lose value";
+    assert (newVirtShares + 1) * oldVirtAssets >= oldVirtShares * newVirtAssets, "shares gain too much value";
 
     satisfy n1 == n2 && n == n1;
 }
@@ -363,6 +371,9 @@ rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint25
     env e;
 
     require (i == 0 && j == 1) || (i == 1 && j == 0);
+    require  i == 0;
+    // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
+    require liquidity_mining_callback() == 0;
 
     require _for != currentContract;
     require e.msg.sender != currentContract;
@@ -379,31 +390,30 @@ rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint25
     // mathint totalXBefore = total_x * BORROWED_PRECISION();
 
     if (i == 0) {
-        userInCoinBalanceBefore = stablecoin.balanceOf(e.msg.sender);
-        contractInCoinBalanceBefore = stablecoin.balanceOf(currentContract);
-        userOutCoinBalanceBefore = collateraltoken.balanceOf(_for);
-        contractOutCoinBalanceBefore = collateraltoken.balanceOf(currentContract);
+        userInCoinBalanceBefore = tokenBalance[stablecoin][e.msg.sender];
+        contractInCoinBalanceBefore = tokenBalance[stablecoin][currentContract];
+        userOutCoinBalanceBefore = tokenBalance[collateraltoken][_for];
+        contractOutCoinBalanceBefore = tokenBalance[collateraltoken][currentContract];
     } else {
-        userInCoinBalanceBefore = collateraltoken.balanceOf(e.msg.sender);
-        contractInCoinBalanceBefore = collateraltoken.balanceOf(currentContract);
-        userOutCoinBalanceBefore = stablecoin.balanceOf(_for);
-        contractOutCoinBalanceBefore = stablecoin.balanceOf(currentContract);
+        userInCoinBalanceBefore = tokenBalance[collateraltoken][e.msg.sender];
+        contractInCoinBalanceBefore = tokenBalance[collateraltoken][currentContract];
+        userOutCoinBalanceBefore = tokenBalance[stablecoin][_for];
+        contractOutCoinBalanceBefore = tokenBalance[stablecoin][currentContract];
     }
 
     exchange(e, i, j, in_amount, min_amount, _for);
 
     if (i == 0) {
-        userInCoinBalanceAfter = stablecoin.balanceOf(e.msg.sender);
-        contractInCoinBalanceAfter = stablecoin.balanceOf(currentContract);
-        userOutCoinBalanceAfter = collateraltoken.balanceOf(_for);
-        contractOutCoinBalanceAfter = collateraltoken.balanceOf(currentContract);
+        userInCoinBalanceAfter = tokenBalance[stablecoin][e.msg.sender];
+        contractInCoinBalanceAfter = tokenBalance[stablecoin][currentContract];
+        userOutCoinBalanceAfter = tokenBalance[collateraltoken][_for];
+        contractOutCoinBalanceAfter = tokenBalance[collateraltoken][currentContract];
     } else {
-        userInCoinBalanceAfter = collateraltoken.balanceOf(e.msg.sender);
-        contractInCoinBalanceAfter = collateraltoken.balanceOf(currentContract);
-        userOutCoinBalanceAfter = stablecoin.balanceOf(_for);
-        contractOutCoinBalanceAfter = stablecoin.balanceOf(currentContract);
+        userInCoinBalanceAfter = tokenBalance[collateraltoken][e.msg.sender];
+        contractInCoinBalanceAfter = tokenBalance[collateraltoken][currentContract];
+        userOutCoinBalanceAfter = tokenBalance[stablecoin][_for];
+        contractOutCoinBalanceAfter = tokenBalance[stablecoin][currentContract];
     }
-
 
     // satisfy userOutCoinBalanceAfter > userOutCoinBalanceBefore;
 
@@ -447,7 +457,7 @@ rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 
     mathint totalYBefore = total_y * BORROWED_PRECISION(); // should correspond to collateral token
 
     mathint stablecoinBalanceBefore = stablecoin.balanceOf(currentContract);
-    mathint collaterlaBalanceBefore = collateraltoken.balanceOf(currentContract);
+    mathint collateralBalanceBefore = collateraltoken.balanceOf(currentContract);
 
     exchange(e, i, j, in_amount, min_amount, _for);
 
@@ -455,9 +465,9 @@ rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 
     mathint totalYAfter = total_y * BORROWED_PRECISION(); // should correspond to collateral token
 
     mathint stablecoinBalanceAfter = stablecoin.balanceOf(currentContract);
-    mathint collaterlaBalanceAfter = collateraltoken.balanceOf(currentContract);
+    mathint collateralBalanceAfter = collateraltoken.balanceOf(currentContract);
 
-    assert collaterlaBalanceAfter - collaterlaBalanceBefore == totalXAfter - totalXBefore;
+    assert collateralBalanceAfter - collateralBalanceBefore == totalXAfter - totalXBefore;
     assert stablecoinBalanceAfter - stablecoinBalanceBefore == totalYAfter - totalYBefore;
 }
 

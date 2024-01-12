@@ -78,9 +78,9 @@ event SetAdminFee:
     fee: uint256
 
 
-MAX_TICKS: constant(int256) = 4
-MAX_TICKS_UINT: constant(uint256) = 4
-MAX_SKIP_TICKS: constant(int256) = 4
+MAX_TICKS: constant(int256) = 50
+MAX_TICKS_UINT: constant(uint256) = 50
+MAX_SKIP_TICKS: constant(int256) = 1024
 
 
 struct UserTicks:
