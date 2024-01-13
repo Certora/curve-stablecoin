@@ -560,6 +560,40 @@ rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 
     assert collateralDiff * COLLATERAL_PRECISION() >= totalYAfter - totalYBefore;
 }
 
+rule integrityOfExchangeDY_bands(uint256 i, uint256 j, uint256 out_amount, uint256 max_amount, address _for) {
+    env e;
+
+    require (i == 0 && j == 1) || (i == 1 && j == 0);
+    // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
+    require liquidity_mining_callback() == 0;
+
+    // avoid timeouts
+    require BORROWED_PRECISION() == 1 || BORROWED_PRECISION() == 1000;
+    require COLLATERAL_PRECISION() == 1 || COLLATERAL_PRECISION() == 1000;
+
+    require _for != currentContract;
+    require e.msg.sender != currentContract;
+
+    mathint totalXBefore = total_x; // should correspond to stablecoin
+    mathint totalYBefore = total_y; // should correspond to collateral token
+
+    mathint stablecoinBalanceBefore = tokenBalance[stablecoin][currentContract];
+    mathint collateralBalanceBefore = tokenBalance[collateraltoken][currentContract];
+
+    exchange(e, i, j, out_amount, max_amount, _for);
+
+    mathint totalXAfter = total_x; // should correspond to stablecoin
+    mathint totalYAfter = total_y; // should correspond to collateral token
+
+    mathint stablecoinDiff = tokenBalance[stablecoin][currentContract] - stablecoinBalanceBefore;
+    mathint collateralDiff = tokenBalance[collateraltoken][currentContract] - collateralBalanceBefore;
+
+    // Check that the actual amount of stablecoin gained is at least what we accounted for in total_x.
+    // Similarly for collateral.  It may be greater because of rounding errors.
+    assert stablecoinDiff * BORROWED_PRECISION() >= totalXAfter - totalXBefore;
+    assert collateralDiff * COLLATERAL_PRECISION() >= totalYAfter - totalYBefore;
+}
+
 rule integrityOfExchange_invariant(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount, address _for) {
     env e;
 
