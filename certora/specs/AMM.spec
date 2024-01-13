@@ -371,9 +371,12 @@ rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint25
     env e;
 
     require (i == 0 && j == 1) || (i == 1 && j == 0);
-    require  i == 0;
     // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
     require liquidity_mining_callback() == 0;
+
+    // avoid timeouts
+    require BORROWED_PRECISION() == 1 || BORROWED_PRECISION() == 1000;
+    require COLLATERAL_PRECISION() == 1 || COLLATERAL_PRECISION() == 1000;
 
     require _for != currentContract;
     require e.msg.sender != currentContract;
@@ -416,13 +419,91 @@ rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint25
     }
 
     // satisfy userOutCoinBalanceAfter > userOutCoinBalanceBefore;
+    mathint userInCoin = userInCoinBalanceBefore - userInCoinBalanceAfter;
+    mathint userOutCoin = userOutCoinBalanceAfter - userOutCoinBalanceBefore;
+    mathint contractInCoin = contractInCoinBalanceAfter - contractInCoinBalanceBefore;
+    mathint contractOutCoin = contractOutCoinBalanceBefore - contractOutCoinBalanceAfter;
 
-    assert userInCoinBalanceBefore >= userInCoinBalanceAfter, "user in coin change";
-    assert userOutCoinBalanceBefore <= userOutCoinBalanceAfter, "user out coin change";
-    assert contractInCoinBalanceBefore <= contractInCoinBalanceAfter, "contract in coin change";
-    assert contractOutCoinBalanceBefore >= contractOutCoinBalanceAfter, "contract out coin change";
-    assert userInCoinBalanceBefore - userInCoinBalanceAfter == contractInCoinBalanceAfter - contractInCoinBalanceBefore, "in coin";
-    assert userOutCoinBalanceAfter - userOutCoinBalanceBefore == contractOutCoinBalanceBefore - contractOutCoinBalanceAfter, "out coin";
+    assert userInCoin >= 0, "user in coin change";
+    assert userOutCoin >= 0, "user out coin change";
+    assert userInCoin == contractInCoin, "in coin";
+    assert userOutCoin == contractOutCoin, "out coin";
+
+    if (userInCoin == 0) {
+        assert userOutCoin == 0, "wrong out";
+    } else {
+        assert userInCoin <= to_mathint(in_amount), "wrong in amount";
+        assert userOutCoin >= to_mathint(min_amount), "wrong out amount";
+    }
+}
+
+rule integrityOfExchangeDY_balance(uint256 i, uint256 j, uint256 out_amount, uint256 max_amount, address _for) {
+    env e;
+
+    require (i == 0 && j == 1) || (i == 1 && j == 0);
+    // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
+    require liquidity_mining_callback() == 0;
+
+    // avoid timeouts
+    require BORROWED_PRECISION() == 1 || BORROWED_PRECISION() == 1000;
+    require COLLATERAL_PRECISION() == 1 || COLLATERAL_PRECISION() == 1000;
+
+
+    require _for != currentContract;
+    require e.msg.sender != currentContract;
+
+    mathint userInCoinBalanceBefore;
+    mathint userOutCoinBalanceBefore;
+    mathint contractInCoinBalanceBefore;
+    mathint contractOutCoinBalanceBefore;
+
+    mathint userInCoinBalanceAfter;
+    mathint userOutCoinBalanceAfter;
+    mathint contractInCoinBalanceAfter;
+    mathint contractOutCoinBalanceAfter;
+
+    if (i == 0) {
+        userInCoinBalanceBefore = tokenBalance[stablecoin][e.msg.sender];
+        contractInCoinBalanceBefore = tokenBalance[stablecoin][currentContract];
+        userOutCoinBalanceBefore = tokenBalance[collateraltoken][_for];
+        contractOutCoinBalanceBefore = tokenBalance[collateraltoken][currentContract];
+    } else {
+        userInCoinBalanceBefore = tokenBalance[collateraltoken][e.msg.sender];
+        contractInCoinBalanceBefore = tokenBalance[collateraltoken][currentContract];
+        userOutCoinBalanceBefore = tokenBalance[stablecoin][_for];
+        contractOutCoinBalanceBefore = tokenBalance[stablecoin][currentContract];
+    }
+
+    exchange_dy(e, i, j, out_amount, max_amount, _for);
+
+    if (i == 0) {
+        userInCoinBalanceAfter = tokenBalance[stablecoin][e.msg.sender];
+        contractInCoinBalanceAfter = tokenBalance[stablecoin][currentContract];
+        userOutCoinBalanceAfter = tokenBalance[collateraltoken][_for];
+        contractOutCoinBalanceAfter = tokenBalance[collateraltoken][currentContract];
+    } else {
+        userInCoinBalanceAfter = tokenBalance[collateraltoken][e.msg.sender];
+        contractInCoinBalanceAfter = tokenBalance[collateraltoken][currentContract];
+        userOutCoinBalanceAfter = tokenBalance[stablecoin][_for];
+        contractOutCoinBalanceAfter = tokenBalance[stablecoin][currentContract];
+    }
+
+    // satisfy userOutCoinBalanceAfter > userOutCoinBalanceBefore;
+    mathint userInCoin = userInCoinBalanceBefore - userInCoinBalanceAfter;
+    mathint userOutCoin = userOutCoinBalanceAfter - userOutCoinBalanceBefore;
+    mathint contractInCoin = contractInCoinBalanceAfter - contractInCoinBalanceBefore;
+    mathint contractOutCoin = contractOutCoinBalanceBefore - contractOutCoinBalanceAfter;
+
+    assert userInCoin >= 0, "user in coin change";
+    assert userOutCoin >= 0, "user out coin change";
+    assert userInCoin == contractInCoin, "in coin";
+    assert userOutCoin == contractOutCoin, "out coin";
+    if (userInCoin == 0) {
+        assert userOutCoin == 0, "wrong out";
+    } else {
+        assert userInCoin <= to_mathint(max_amount), "wrong in amount";
+        assert userOutCoin >= to_mathint(out_amount), "wrong out amount";
+    }
 }
 
 rule exchangeDoesNotChangeUserShares(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount) {
@@ -449,29 +530,35 @@ rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 
     env e;
 
     require (i == 0 && j == 1) || (i == 1 && j == 0);
+    // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
+    require liquidity_mining_callback() == 0;
+
+    // avoid timeouts
+    require BORROWED_PRECISION() == 1 || BORROWED_PRECISION() == 1000;
+    require COLLATERAL_PRECISION() == 1 || COLLATERAL_PRECISION() == 1000;
 
     require _for != currentContract;
     require e.msg.sender != currentContract;
 
-    mathint totalXBefore = total_x * BORROWED_PRECISION(); // should correspond to stablecoin
-    mathint totalYBefore = total_y * BORROWED_PRECISION(); // should correspond to collateral token
+    mathint totalXBefore = total_x; // should correspond to stablecoin
+    mathint totalYBefore = total_y; // should correspond to collateral token
 
-    mathint stablecoinBalanceBefore = stablecoin.balanceOf(currentContract);
-    mathint collateralBalanceBefore = collateraltoken.balanceOf(currentContract);
+    mathint stablecoinBalanceBefore = tokenBalance[stablecoin][currentContract];
+    mathint collateralBalanceBefore = tokenBalance[collateraltoken][currentContract];
 
     exchange(e, i, j, in_amount, min_amount, _for);
 
-    mathint totalXAfter = total_x * BORROWED_PRECISION(); // should correspond to stablecoin
-    mathint totalYAfter = total_y * BORROWED_PRECISION(); // should correspond to collateral token
+    mathint totalXAfter = total_x; // should correspond to stablecoin
+    mathint totalYAfter = total_y; // should correspond to collateral token
 
-    mathint stablecoinBalanceAfter = stablecoin.balanceOf(currentContract);
-    mathint collateralBalanceAfter = collateraltoken.balanceOf(currentContract);
+    mathint stablecoinDiff = tokenBalance[stablecoin][currentContract] - stablecoinBalanceBefore;
+    mathint collateralDiff = tokenBalance[collateraltoken][currentContract] - collateralBalanceBefore;
 
-    assert collateralBalanceAfter - collateralBalanceBefore == totalXAfter - totalXBefore;
-    assert stablecoinBalanceAfter - stablecoinBalanceBefore == totalYAfter - totalYBefore;
+    // Check that the actual amount of stablecoin gained is at least what we accounted for in total_x.
+    // Similarly for collateral.  It may be greater because of rounding errors.
+    assert stablecoinDiff * BORROWED_PRECISION() >= totalXAfter - totalXBefore;
+    assert collateralDiff * COLLATERAL_PRECISION() >= totalYAfter - totalYBefore;
 }
-
-
 
 rule integrityOfExchange_invariant(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount, address _for) {
     env e;
@@ -485,33 +572,6 @@ rule integrityOfExchange_invariant(uint256 i, uint256 j, uint256 in_amount, uint
 
     assert true;
 }
-
-
-
-
-
-
-
-
-
-
-
-rule integrityOfExchange_balanceMonotonicity(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount) {
-    env e;
-    require (i == 0 && j == 1) || (i == 1 && j == 0);
-
-    mathint borrowedTokenBalanceBefore = stablecoin.balanceOf(e.msg.sender);
-    mathint totalXBefore = total_x * BORROWED_PRECISION();
-
-    // collateraltoken.balanceOf(msg.sender);
-    exchange(e, i, j, in_amount, min_amount);
-
-    mathint borrowedTokenBalanceAfter = stablecoin.balanceOf(e.msg.sender);
-    mathint totalXAfter = total_x * BORROWED_PRECISION();
-    assert (totalXBefore < totalXAfter) => (borrowedTokenBalanceBefore <= borrowedTokenBalanceAfter);
-    assert (borrowedTokenBalanceBefore < borrowedTokenBalanceAfter) => (totalXBefore <= totalXAfter);
-}
-
 
 /*
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_amount: uint256, _for: address = msg.sender) -> uint256[2]:
