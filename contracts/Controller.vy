@@ -1341,6 +1341,11 @@ def get_initial_debt(user: address) -> uint256:
 
 @external
 @view
+def get_total_initial_debt() -> uint256:
+    return self._total_debt.initial_debt
+
+@external
+@view
 def get_user_rate_mul(user: address) -> uint256:
     return self.loan[user].rate_mul
 
