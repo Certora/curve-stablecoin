@@ -6,9 +6,8 @@ certoraRun contracts/Controller.vy certora/mocs/Stablecoin.vy contracts/AMM.vy c
     --link Controller:AMM=AMM \
     --link AMM:COLLATERAL_TOKEN=CollateralToken \
     --link Controller:FACTORY=FactoryMock \
-    --loop_iter 3 \
+    --loop_iter 5 \
     --optimistic_loop \
     --process evm \
-    --rule_sanity \
-    --msg "Controller $1" --server production --prover_version shelly/mergedvyperwithjohn \
-    --prover_args '-tmpOptAllGhostsAreGlobal true -canonicalizeTAC false -enableMemorySplit false -enableSolidityBasedInlining false -optimisticFallback true' --rule $1
+    --msg "Controller $1" --server production --prover_version jtoman/cert-4396 --rule $1 --cache none \
+    --prover_args '-tmpOptAllGhostsAreGlobal true -canonicalizeTAC false -enableMemorySplit false -enableSolidityBasedInlining false -optimisticFallback true -enableMemoryOverlapsFixer false'
