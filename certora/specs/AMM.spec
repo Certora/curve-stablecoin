@@ -8,6 +8,8 @@ methods {
     function BORROWED_PRECISION() external returns uint256 envfree;
     function COLLATERAL_PRECISION() external returns uint256 envfree;
     function active_band() external returns int256 envfree;
+    function min_band() external returns int256 envfree;
+    function max_band() external returns int256 envfree;
     function bands_x(int256 n) external returns uint256 envfree;
     function bands_y(int256 n) external returns uint256 envfree;
     function read_user_tick_numbers(address) external returns int256[2] envfree;
@@ -404,7 +406,8 @@ rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint25
         contractOutCoinBalanceBefore = tokenBalance[stablecoin][currentContract];
     }
 
-    exchange(e, i, j, in_amount, min_amount, _for);
+    uint256[2] traded;
+    traded = exchange(e, i, j, in_amount, min_amount, _for);
 
     if (i == 0) {
         userInCoinBalanceAfter = tokenBalance[stablecoin][e.msg.sender];
@@ -435,6 +438,8 @@ rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint25
         assert userInCoin <= to_mathint(in_amount), "wrong in amount";
         assert userOutCoin >= to_mathint(min_amount), "wrong out amount";
     }
+    assert userInCoin == to_mathint(traded[0]), "return value doesn't match in";
+    assert userOutCoin == to_mathint(traded[1]), "return value doesn't match out";
 }
 
 rule integrityOfExchangeDY_balance(uint256 i, uint256 j, uint256 out_amount, uint256 max_amount, address _for) {
@@ -474,7 +479,8 @@ rule integrityOfExchangeDY_balance(uint256 i, uint256 j, uint256 out_amount, uin
         contractOutCoinBalanceBefore = tokenBalance[stablecoin][currentContract];
     }
 
-    exchange_dy(e, i, j, out_amount, max_amount, _for);
+    uint256[2] traded;
+    traded = exchange_dy(e, i, j, out_amount, max_amount, _for);
 
     if (i == 0) {
         userInCoinBalanceAfter = tokenBalance[stablecoin][e.msg.sender];
@@ -504,6 +510,8 @@ rule integrityOfExchangeDY_balance(uint256 i, uint256 j, uint256 out_amount, uin
         assert userInCoin <= to_mathint(max_amount), "wrong in amount";
         assert userOutCoin >= to_mathint(out_amount), "wrong out amount";
     }
+    assert userInCoin == to_mathint(traded[0]), "return value doesn't match in";
+    assert userOutCoin == to_mathint(traded[1]), "return value doesn't match out";
 }
 
 rule exchangeDoesNotChangeUserShares(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount) {
@@ -546,7 +554,8 @@ rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 
     mathint stablecoinBalanceBefore = tokenBalance[stablecoin][currentContract];
     mathint collateralBalanceBefore = tokenBalance[collateraltoken][currentContract];
 
-    exchange(e, i, j, in_amount, min_amount, _for);
+    uint256[2] traded;
+    traded = exchange(e, i, j, in_amount, min_amount, _for);
 
     mathint totalXAfter = total_x; // should correspond to stablecoin
     mathint totalYAfter = total_y; // should correspond to collateral token
@@ -558,6 +567,8 @@ rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 
     // Similarly for collateral.  It may be greater because of rounding errors.
     assert stablecoinDiff * BORROWED_PRECISION() >= totalXAfter - totalXBefore;
     assert collateralDiff * COLLATERAL_PRECISION() >= totalYAfter - totalYBefore;
+    assert to_mathint(traded[0]) == (i == 0 ? stablecoinDiff : collateralDiff);
+    assert to_mathint(traded[1]) == (j == 0 ? - stablecoinDiff : - collateralDiff);
 }
 
 rule integrityOfExchangeDY_bands(uint256 i, uint256 j, uint256 out_amount, uint256 max_amount, address _for) {
@@ -580,7 +591,8 @@ rule integrityOfExchangeDY_bands(uint256 i, uint256 j, uint256 out_amount, uint2
     mathint stablecoinBalanceBefore = tokenBalance[stablecoin][currentContract];
     mathint collateralBalanceBefore = tokenBalance[collateraltoken][currentContract];
 
-    exchange(e, i, j, out_amount, max_amount, _for);
+    uint256[2] traded;
+    traded = exchange_dy(e, i, j, out_amount, max_amount, _for);
 
     mathint totalXAfter = total_x; // should correspond to stablecoin
     mathint totalYAfter = total_y; // should correspond to collateral token
@@ -592,6 +604,8 @@ rule integrityOfExchangeDY_bands(uint256 i, uint256 j, uint256 out_amount, uint2
     // Similarly for collateral.  It may be greater because of rounding errors.
     assert stablecoinDiff * BORROWED_PRECISION() >= totalXAfter - totalXBefore;
     assert collateralDiff * COLLATERAL_PRECISION() >= totalYAfter - totalYBefore;
+    assert to_mathint(traded[0]) == (i == 0 ? stablecoinDiff : collateralDiff);
+    assert to_mathint(traded[1]) == (j == 0 ? - stablecoinDiff : - collateralDiff);
 }
 
 rule integrityOfExchange_invariant(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount, address _for) {
@@ -605,6 +619,26 @@ rule integrityOfExchange_invariant(uint256 i, uint256 j, uint256 in_amount, uint
     mathint ef = A(e);
 
     assert true;
+}
+
+/* This rule shows that exchange_dx allows trades where the trader is not fully paid */
+rule exchange_dy_bad_trade {
+    env e;
+    uint256[2] traded;
+
+    require liquidity_mining_callback() == 0;
+    require BORROWED_PRECISION() == 1;
+    require COLLATERAL_PRECISION() == 1;
+
+    require e.msg.sender != currentContract;
+
+    require active_band() == max_band();
+
+    // request to buy 50 collateral for at most 3 stable
+    traded = exchange_dy(e, 0, 1, 50, 3, e.msg.sender);
+
+    // trader gets only 2 collateral and loses all 3 stable.
+    satisfy traded[0] == 3 && traded[1] == 2;
 }
 
 /*

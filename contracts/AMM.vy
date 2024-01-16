@@ -135,6 +135,7 @@ bands_x: public(HashMap[int256, uint256])
 bands_y: public(HashMap[int256, uint256])
 
 exp_summary: public(HashMap[int256, uint256])
+y0_summary: public(HashMap[bytes32, uint256])
 
 total_shares: public(HashMap[int256, uint256])
 user_shares: HashMap[address, UserTicks]
@@ -483,20 +484,21 @@ def _get_y0(x: uint256, y: uint256, p_o: uint256, p_o_up: uint256) -> uint256:
     @param p_o_up Upper boundary of the band
     @return y0
     """
-    assert p_o != 0
-    # solve:
-    # p_o * A * y0**2 - y0 * (p_oracle_up/p_o * (A-1) * x + p_o**2/p_oracle_up * A * y) - xy = 0
-    b: uint256 = 0
-    # p_o_up * unsafe_sub(A, 1) * x / p_o + A * p_o**2 / p_o_up * y / 10**18
-    if x != 0:
-        b = unsafe_div(p_o_up * Aminus1 * x, p_o)
-    if y != 0:
-        b += unsafe_div(A * p_o**2 / p_o_up * y, 10**18)
-    if x > 0 and y > 0:
-        D: uint256 = b**2 + unsafe_div(((4 * A) * p_o) * y, 10**18) * x
-        return unsafe_div((b + self.sqrt_int(D)) * 10**18, unsafe_mul(2 * A, p_o))
-    else:
-        return unsafe_div(b * 10**18, unsafe_mul(A, p_o))
+    return self.y0_summary[keccak256(_abi_encode(x,y,p_o,p_o_up))]
+#    assert p_o != 0
+#    # solve:
+#    # p_o * A * y0**2 - y0 * (p_oracle_up/p_o * (A-1) * x + p_o**2/p_oracle_up * A * y) - xy = 0
+#    b: uint256 = 0
+#    # p_o_up * unsafe_sub(A, 1) * x / p_o + A * p_o**2 / p_o_up * y / 10**18
+#    if x != 0:
+#        b = unsafe_div(p_o_up * Aminus1 * x, p_o)
+#    if y != 0:
+#        b += unsafe_div(A * p_o**2 / p_o_up * y, 10**18)
+#    if x > 0 and y > 0:
+#        D: uint256 = b**2 + unsafe_div(((4 * A) * p_o) * y, 10**18) * x
+#        return unsafe_div((b + self.sqrt_int(D)) * 10**18, unsafe_mul(2 * A, p_o))
+#    else:
+#        return unsafe_div(b * 10**18, unsafe_mul(A, p_o))
 
 
 @internal
@@ -1151,7 +1153,7 @@ def calc_swap_in(pump: bool, out_amount: uint256, p_o: uint256[2], in_precision:
     @param pump Indicates whether the trade buys or sells collateral
     @param out_amount Desired amount of token going out
     @param p_o Current oracle price and antisandwich fee (p_o, dynamic_fee)
-    @return Amounts required and given out, initial and final bands of the AMM, new
+    @return Amounts required and given out, initial a nd final bands of the AMM, new
             amounts of coins in bands in the AMM, as well as admin fee charged,
             all in one data structure
     """
