@@ -602,10 +602,10 @@ rule integrityOfExchangeDY_bands(uint256 i, uint256 j, uint256 out_amount, uint2
 
     // Check that the actual amount of stablecoin gained is at least what we accounted for in total_x.
     // Similarly for collateral.  It may be greater because of rounding errors.
-    assert stablecoinDiff * BORROWED_PRECISION() >= totalXAfter - totalXBefore;
-    assert collateralDiff * COLLATERAL_PRECISION() >= totalYAfter - totalYBefore;
-    assert to_mathint(traded[0]) == (i == 0 ? stablecoinDiff : collateralDiff);
-    assert to_mathint(traded[1]) == (j == 0 ? - stablecoinDiff : - collateralDiff);
+    assert stablecoinDiff * BORROWED_PRECISION() >= totalXAfter - totalXBefore, "total_x change matches balance change";
+    assert collateralDiff * COLLATERAL_PRECISION() >= totalYAfter - totalYBefore, "total_y change matches balance change";
+    assert to_mathint(traded[0]) == (i == 0 ? stablecoinDiff : collateralDiff), "in amount match return value";
+    assert to_mathint(traded[1]) == (j == 0 ? - stablecoinDiff : - collateralDiff), "out amount match return value";
 }
 
 rule integrityOfExchange_invariant(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount, address _for) {

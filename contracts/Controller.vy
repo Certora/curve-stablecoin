@@ -52,6 +52,7 @@ interface Factory:
     def admin() -> address: view
     def fee_receiver() -> address: view
     def WETH() -> address: view
+    def log2(_x: uint256) -> int256: view
 
 interface PriceOracle:
     def price() -> uint256: view
@@ -59,6 +60,7 @@ interface PriceOracle:
 
 interface Sum:
     def _calculate_debt_n1(collateral: uint256, debt: uint256, N: uint256) -> int256: view
+
 
 
 event UserState:
@@ -203,7 +205,7 @@ def __init__(
     _A: uint256 = LLAMMA(amm).A()
     A = _A
     Aminus1 = _A - 1
-    LOG2_A_RATIO = self.log2(_A * 10**18 / unsafe_sub(_A, 1))
+    LOG2_A_RATIO = self.FACTORY.log2(_A * 10**18 / unsafe_sub(_A, 1))
 
     self.COLLATERAL_TOKEN = ERC20(collateral_token)
     COLLATERAL_PRECISION = pow_mod256(10, 18 - ERC20(collateral_token).decimals())
@@ -234,30 +236,6 @@ def log2(_x: uint256) -> int256:
     # adapted from: https://medium.com/coinmonks/9aef8515136e
     # and vyper log implementation
     # Might use more optimal solmate's log
-    inverse: bool = _x < 10**18
-    res: uint256 = 0
-    x: uint256 = _x
-    if inverse:
-        x = 10**36 / x
-    t: uint256 = 2**7
-    for i in range(1):
-        p: uint256 = pow_mod256(2, t)
-        if x >= unsafe_mul(p, 10**18):
-            x = unsafe_div(x, p)
-            res = unsafe_add(unsafe_mul(t, 10**18), res)
-        t = unsafe_div(t, 2)
-    d: uint256 = 10**18
-    for i in range(34):  # 10 decimals: math.log(10**10, 2) == 33.2. Need more?
-        if (x >= 2 * 10**18):
-            res = unsafe_add(res, d)
-            x = unsafe_div(x, 2)
-        x = unsafe_div(unsafe_mul(x, x), 10**18)
-        d = unsafe_div(d, 2)
-    if inverse:
-        return -convert(res, int256)
-    else:
-        return convert(res, int256)
-
 
 @external
 @view
@@ -423,7 +401,7 @@ def _calculate_debt_n1(collateral: uint256, debt: uint256, N: uint256) -> int256
     # n1 = floor(log2(y_effective) / self.logAratio)
     # EVM semantics is not doing floor unlike Python, so we do this
     assert y_effective > 0, "Amount too low"
-    n1: int256 = self.log2(y_effective)  # <- switch to faster ln() XXX?
+    n1: int256 = self.FACTORY.log2(y_effective)  # <- switch to faster ln() XXX?
     if n1 < 0:
         n1 -= LOG2_A_RATIO - 1  # This is to deal with vyper's rounding of negative numbers
     n1 /= LOG2_A_RATIO
@@ -447,7 +425,7 @@ def max_p_base() -> uint256:
     """
     p_oracle: uint256 = self.AMM.price_oracle()
     # Should be correct unless price changes suddenly by MAX_P_BASE_BANDS+ bands
-    n1: int256 = unsafe_div(self.log2(self.AMM.get_base_price() * 10**18 / p_oracle), LOG2_A_RATIO) + MAX_P_BASE_BANDS
+    n1: int256 = unsafe_div(self.FACTORY.log2(self.AMM.get_base_price() * 10**18 / p_oracle), LOG2_A_RATIO) + MAX_P_BASE_BANDS
     p_base: uint256 = self.AMM.p_oracle_up(n1)
     n_min: int256 = self.AMM.active_band_with_skip()
 
@@ -1340,6 +1318,16 @@ def get_initial_debt(user: address) -> uint256:
     return self.loan[user].initial_debt
 
 @external
+@view
+def get_total_initial_debt() -> uint256:
+    return self._total_debt.initial_debt
+
+@external
+@view
+def get_user_rate_mul(user: address) -> uint256:
+    return self.loan[user].rate_mul
+
+@external
 def increase_discount(user: address, amount: uint256):
     liquidation_discount: uint256 = self.liquidation_discounts[user]
     new_discount: uint256 = liquidation_discount + amount
@@ -1350,3 +1338,7 @@ def increase_discount(user: address, amount: uint256):
 def get_liquidation_discounts(user: address) -> uint256:
     return self.liquidation_discounts[user]
 
+@external
+def increaseDiscount(user: address, amount: uint256):
+    current_discount: uint256 = self.liquidation_discounts[user]
+    self.liquidation_discounts[user] = current_discount + amount

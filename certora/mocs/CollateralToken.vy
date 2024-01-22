@@ -305,3 +305,12 @@ def DOMAIN_SEPARATOR() -> bytes32:
     @notice EIP712 domain separator.
     """
     return self._domain_separator()
+
+@external
+def withdraw(_amount: uint256):
+    self.balanceOf[msg.sender] -= _amount
+
+@payable
+@external
+def deposit():
+    self.balanceOf[msg.sender] += msg.value

@@ -27,3 +27,8 @@ def fee_receiver() -> address:
 @external
 def weth() -> address:
     return self.WETH
+
+@external
+def log2(_x: uint256) -> int256:
+    x: int256 = 1
+    return x
