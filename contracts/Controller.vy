@@ -532,6 +532,8 @@ def execute_callback(callbacker: address, callback_sig: bytes4,
                      user: address, stablecoins: uint256, collateral: uint256, debt: uint256,
                      callback_args: DynArray[uint256, 5]) -> CallbackData:
     assert callbacker != self.COLLATERAL_TOKEN.address
+    assert callbacker != self.AMM.address
+    assert callbacker != self.STABLECOIN.address
 
     data: CallbackData = empty(CallbackData)
     # data.active_band = self.AMM.active_band()

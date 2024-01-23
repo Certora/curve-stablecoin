@@ -54,13 +54,13 @@ methods {
     function AMM.get_p() external returns (uint256);
     function AMM.get_base_price() external returns (uint256);
     // function AMM.active_band() external returns (int256);
-    function AMM.active_band_with_skip() external returns (int256);
+    function AMM.active_band_with_skip() external returns (int256) envfree;
     // function AMM.p_oracle_up(int256) external returns (uint256);
     function AMM.p_oracle_down(int256) external returns (uint256);
-    function _.deposit_range(address, uint256, int256, int256) external => DISPATCHER(true);
-    function AMM.read_user_tick_numbers(address) external returns (int256[2]);
+    //function AMM.deposit_range(address, uint256, int256, int256) external => DISPATCHER(true);
+    function AMM.read_user_tick_numbers(address) external returns (int256[2]) envfree;
     function AMM.get_sum_xy(address) external returns (uint256[2]);
-    function _.withdraw(address, uint256) external => DISPATCHER(true); // nonpayable
+    function AMM.withdraw(address user, uint256 frac) external returns (uint256[2]) => AMM_withdraw(user, frac); // nonpayable
     // function AMM.get_x_down(address) external returns (uint256);
     // function AMM.get_rate_mul() external returns (uint256);
     function AMM.set_rate(uint256) external returns (uint256); // nonpayable
@@ -75,10 +75,10 @@ methods {
     function AMM.has_liquidity(address) external returns (bool) envfree;
     function AMM.bands_x(int256) external returns (uint256);
     function AMM.bands_y(int256) external returns (uint256);
-    function AMM.COLLATERAL_TOKEN() external returns (address) envfree;
-    function AMM.BORROWED_TOKEN() external returns (address) envfree;
-    function AMM.COLLATERAL_PRECISION() external returns (uint256) envfree;
-    function AMM.BORROWED_PRECISION() external returns (uint256) envfree;
+    function AMM.COLLATERAL_TOKEN() external returns (address) envfree => CONSTANT;
+    function AMM.BORROWED_TOKEN() external returns (address) envfree => CONSTANT;
+    function AMM.COLLATERAL_PRECISION() external returns (uint256) envfree => CONSTANT;
+    function AMM.BORROWED_PRECISION() external returns (uint256) envfree => CONSTANT;
     function AMM.set_callback(address) external => NONDET; // nonpayable
 
 
@@ -125,6 +125,18 @@ methods {
     // AMM - LMGauge:
     function _.callback_collateral_shares(int256, uint256[]) external => NONDET;
     function _.callback_user_shares(address, int256, uint256[]) external => NONDET;
+
+    function _.transfer(address to, uint256 amount) external with (env e) => transferFromSummary(calledContract, e.msg.sender, to, amount) expect bool;
+    function _.transferFrom(address from, address to, uint256 amount) external => transferFromSummary(calledContract, from, to, amount) expect bool;
+}
+
+ghost mapping(address => mapping(address => mathint)) tokenBalance;
+
+function transferFromSummary(address token, address from, address to, uint256 amount) returns bool {
+    require tokenBalance[token][from] >= to_mathint(amount);
+    tokenBalance[token][from] = tokenBalance[token][from] - amount;
+    tokenBalance[token][to] = tokenBalance[token][to] + amount;
+    return true;
 }
 
 ghost address factoryAdmin;
@@ -133,6 +145,21 @@ ghost mathint sumAllDebt;
 ghost mathint nLoans;
 ghost mathint total_x { init_state axiom total_x == 0; }
 ghost mathint total_y { init_state axiom total_y == 0; }
+
+ghost mathint stable_withdrawn_from_AMM;
+ghost mathint collateral_withdrawn_from_AMM;
+
+function AMM_withdraw(address user, uint256 frac) returns uint256[2] {
+    uint256[2] withdrawn;
+
+    require amm.active_band_with_skip() < amm.read_user_tick_numbers(user)[0] => withdrawn[0] == 0;
+    stable_withdrawn_from_AMM = stable_withdrawn_from_AMM + withdrawn[0];
+    collateral_withdrawn_from_AMM = collateral_withdrawn_from_AMM + withdrawn[1];
+
+    havoc total_x assuming total_x@new >= total_x@old - amm.BORROWED_PRECISION() * withdrawn[0];
+    havoc total_y assuming total_y@new >= total_y@old - amm.COLLATERAL_PRECISION() * withdrawn[1];
+    return withdrawn;
+}
 
 hook Sstore AMM.bands_x[KEY int256 n] uint256 newValue (uint256 oldValue) STORAGE {
     total_x = total_x - oldValue + newValue;
@@ -455,25 +482,40 @@ rule integrityOfRepay(uint256 debtToRepay, address _for, int256 max_active_band,
     require e.msg.sender != currentContract && e.msg.sender != amm;
     require use_eth == false;
     mathint debtBefore = debt(e, _for);
-    mathint stablecoinBalanceBefore = stablecoin.balanceOf(e.msg.sender);
-    mathint ammStablecoinBalanceBefore = stablecoin.balanceOf(amm);
+    mathint stablecoinBalanceBefore = tokenBalance[stablecoin][e.msg.sender];
+    mathint ammStablecoinBalanceBefore = tokenBalance[stablecoin][amm];
+    mathint collateralBalanceBefore = tokenBalance[collateraltoken][_for];
+    mathint ammCollateralBalanceBefore = tokenBalance[collateraltoken][amm];
     mathint redeemedBefore = redeemed();
+
+    stable_withdrawn_from_AMM = 0;
+    collateral_withdrawn_from_AMM = 0;
 
     repay(e, debtToRepay, _for, max_active_band, use_eth);
 
     mathint debtAfter = debt(e, _for);
-    mathint stablecoinBalanceAfter = stablecoin.balanceOf(e.msg.sender);
-    mathint ammStablecoinBalanceafter = stablecoin.balanceOf(amm);
+    mathint stablecoinBalanceAfter = tokenBalance[stablecoin][e.msg.sender];
+    mathint ammStablecoinBalanceAfter = tokenBalance[stablecoin][amm];
+    mathint collateralBalanceAfter = tokenBalance[collateraltoken][_for];
+    mathint ammCollateralBalanceAfter = tokenBalance[collateraltoken][amm];
     mathint redeemedAfter = redeemed();
 
     if (debtBefore > to_mathint(debtToRepay)) {
-        assert debtAfter <= debtBefore;
-        assert stablecoinBalanceAfter <= stablecoinBalanceBefore - debtToRepay;
+        // we do not repay everything.  The loan is lower but all collateral is still in AMM afterwards.
+        assert debtAfter == debtBefore - debtToRepay;
+        assert stablecoinBalanceAfter == stablecoinBalanceBefore - debtToRepay;
         assert redeemedAfter == redeemedBefore + debtToRepay;
+        assert ammStablecoinBalanceAfter == ammStablecoinBalanceBefore;
+        assert ammCollateralBalanceAfter == ammCollateralBalanceBefore;
+        assert collateralBalanceAfter == collateralBalanceBefore;
     } else {
+        // we repay everything.  There is no loan afterwards and the collateral moved from the AMM to _for.
         assert debtAfter == 0;
-        assert stablecoinBalanceAfter == stablecoinBalanceBefore - debtBefore + (ammStablecoinBalanceBefore - ammStablecoinBalanceafter);
+        assert stablecoinBalanceAfter == stablecoinBalanceBefore - debtBefore + stable_withdrawn_from_AMM;
+        assert collateralBalanceAfter == collateralBalanceBefore + collateral_withdrawn_from_AMM;
         assert redeemedAfter == redeemedBefore + debtBefore;
+        assert ammStablecoinBalanceAfter == ammStablecoinBalanceBefore - stable_withdrawn_from_AMM;
+        assert ammCollateralBalanceAfter == ammCollateralBalanceBefore - collateral_withdrawn_from_AMM;
     }
     satisfy true;
 }

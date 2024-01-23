@@ -8,6 +8,7 @@ methods {
     function BORROWED_PRECISION() external returns uint256 envfree;
     function COLLATERAL_PRECISION() external returns uint256 envfree;
     function active_band() external returns int256 envfree;
+    function active_band_with_skip() external returns int256 envfree;
     function min_band() external returns int256 envfree;
     function max_band() external returns int256 envfree;
     function bands_x(int256 n) external returns uint256 envfree;
@@ -160,6 +161,11 @@ invariant n1_n2_inrange()
     }
 }
 
+invariant low_bands_empty(int256 n)
+    n < min_band() => bands_x(n) == 0 && bands_y(n) == 0;
+invariant high_bands_empty(int256 n)
+    n > max_band() => bands_x(n) == 0 && bands_y(n) == 0;
+
 invariant low_bands_in_x(int256 n)
     n < active_band() => bands_y(n) == 0;
 
@@ -197,6 +203,31 @@ rule withdraw_removes_from_bands(address user, uint256 frac) {
     mathint removed_y = total_y_before - total_y;
     assert amount_x * BORROWED_PRECISION() <= removed_x && removed_x < (amount_x + 2 * num_bands) * BORROWED_PRECISION();
     assert amount_y * COLLATERAL_PRECISION() <= removed_y && removed_y < (amount_y + 2 * num_bands) * COLLATERAL_PRECISION();
+}
+
+rule withdraw_when_not_in_softliquidation(address user, uint256 frac) {
+    env e;
+    requireInvariant n1_n2_inrange();
+    mathint n1_before = user_n1[user];
+    mathint min_band = min_band();
+    requireInvariant low_bands_empty(require_int256(n1_before));
+    requireInvariant high_bands_in_y(require_int256(n1_before));
+    if (n1_before + 1 <= user_n2[user]) {
+        requireInvariant high_bands_in_y(require_int256(n1_before + 1));
+        requireInvariant low_bands_empty(require_int256(n1_before + 1));
+    }
+    if (n1_before + 2 <= user_n2[user]) {
+        requireInvariant high_bands_in_y(require_int256(n1_before + 2));
+        requireInvariant low_bands_empty(require_int256(n1_before + 1));
+    }
+    if (n1_before + 3 <= user_n2[user]) {
+        requireInvariant high_bands_in_y(require_int256(n1_before + 3));
+        requireInvariant low_bands_empty(require_int256(n1_before + 1));
+    }
+    mathint active_band_before = active_band_with_skip();
+    uint256[2] amounts;
+    amounts = withdraw(e, user, frac);
+    assert n1_before > active_band_before => amounts[0] == 0;
 }
 
 rule withdraw_all_user_shares(address user) {
