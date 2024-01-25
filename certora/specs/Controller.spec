@@ -96,7 +96,6 @@ methods {
     function AMM.get_amount_for_price(uint256) external returns (uint256, bool) => NONDET;
     function AMM.exchange(uint256,uint256,uint256,uint256) external returns (uint256[2]) => NONDET;
     function AMM.p_oracle_up(int256) external returns (uint256) => NONDET;
-    function AMM._ external => NONDET;
 
     // STABLECOIN:
     function Stablecoin.balanceOf(address) external returns (uint256) envfree;
@@ -114,9 +113,6 @@ methods {
 
     // MonetaryPolicy:
     function _.rate_write() external => CONSTANT;
-
-    // havocing AMM:
-    function _.get_rate_mul() external => CONSTANT;
 
     // Controller heavy math:
     function _._calculate_debt_n1(uint256, uint256, uint256) external => NONDET;
@@ -142,7 +138,7 @@ function transferFromSummary(address token, address from, address to, uint256 am
 ghost address factoryAdmin;
 ghost address feeReceiver;
 ghost mathint sumAllDebt;
-ghost mathint nLoans;
+persistent ghost uint256 nLoans { init_state axiom nLoans == 0; }
 ghost mathint total_x { init_state axiom total_x == 0; }
 ghost mathint total_y { init_state axiom total_y == 0; }
 
@@ -152,12 +148,20 @@ ghost mathint collateral_withdrawn_from_AMM;
 function AMM_withdraw(address user, uint256 frac) returns uint256[2] {
     uint256[2] withdrawn;
 
+    require amm.has_liquidity(user);
     require amm.active_band_with_skip() < amm.read_user_tick_numbers(user)[0] => withdrawn[0] == 0;
     stable_withdrawn_from_AMM = stable_withdrawn_from_AMM + withdrawn[0];
     collateral_withdrawn_from_AMM = collateral_withdrawn_from_AMM + withdrawn[1];
 
+    havoc amm.user_shares[user].ns;
+    havoc amm.user_shares[user].ticks[0];
+    //havoc amm.bands_x;
+    //havoc amm.bands_y;
+
     havoc total_x assuming total_x@new >= total_x@old - amm.BORROWED_PRECISION() * withdrawn[0];
     havoc total_y assuming total_y@new >= total_y@old - amm.COLLATERAL_PRECISION() * withdrawn[1];
+    require frac < 10^18 <=> amm.has_liquidity(user);
+
     return withdrawn;
 }
 
@@ -177,7 +181,7 @@ invariant liquidity_on_collateral()
 // ghost mapping(address => uint256) loansInitialDebt {
 //     init_state axiom forall address user . loansInitialDebt[user] == 0;
 // }
-ghost mapping(address => uint256) loansInitialDebt {
+persistent ghost mapping(address => uint256) loansInitialDebt {
     init_state axiom forall address user . loansInitialDebt[user] == 0;
 }
 
@@ -189,7 +193,7 @@ ghost mapping(uint256 => address) loansMirror {
     init_state axiom forall uint256 indx . loansMirror[indx] == 0;
 }
 
-ghost mapping(address => uint256) loansIxMirror {
+persistent ghost mapping(address => uint256) loansIxMirror {
     init_state axiom forall address user . loansIxMirror[user] == 0;
 }
 
@@ -198,7 +202,6 @@ ghost mapping(uint256 => int256) log2Sum {
 }
 
 hook Sstore loans[INDEX uint256 indx] address newUser (address oldUser) STORAGE {
-    // nLoans = nLoans + 1;
     loansMirror[indx] = newUser;
 }
 
@@ -212,6 +215,14 @@ hook Sstore loan_ix[KEY address user] uint256 newIndex (uint256 oldIndex) STORAG
 
 hook Sload uint256 loanIndex loan_ix[KEY address user] STORAGE {
     require  loansIxMirror[user] == loanIndex;
+}
+
+hook Sstore n_loans uint256 newNLoans (uint256 oldNLoans) STORAGE {
+    nLoans = newNLoans;
+}
+
+hook Sload uint256 value n_loans STORAGE {
+    require nLoans == value;
 }
 
 hook Sstore loan[KEY address user].initial_debt uint256 newInitialDebt (uint256 oldInitialDebt) STORAGE {
@@ -259,8 +270,16 @@ invariant totalDebtEqSumAllDebts()
         }
     }
 
-invariant loansAndLoansIxInverse(address user)
-    loansMirror[loansIxMirror[user]] == user;
+invariant loansAndLoansIxInverse()
+    (forall address user.
+        (loansIxMirror[user] == 0 && loansInitialDebt[user] == 0) ||
+        (loansMirror[loansIxMirror[user]] == user && 0 <= loansIxMirror[user] && loansIxMirror[user] < nLoans))
+    && (forall uint256 ix. 0 <= ix && ix < nLoans => loansIxMirror[loansMirror[ix]] == ix)
+    {
+        preserved repay_extended(address callbacker, uint256[] callback_args) with (env e) {
+            requireInvariant loansAndShares(e.msg.sender);
+        }
+    }
 
 invariant mintedPlusRedeemedEqTotalSupply()
     to_mathint(total_debt()) == minted() - redeemed(); // maybe stablecoin.balaceOf(currentContratc / AMM) == minted() + redeemed();?
@@ -479,7 +498,7 @@ rule anyPositionCanBeClosed(method f, address user)
 
 rule integrityOfRepay(uint256 debtToRepay, address _for, int256 max_active_band, bool use_eth) {
     env e;
-    require e.msg.sender != currentContract && e.msg.sender != amm;
+    require e.msg.sender != currentContract && e.msg.sender != amm && _for != amm;
     require use_eth == false;
     mathint debtBefore = debt(e, _for);
     mathint stablecoinBalanceBefore = tokenBalance[stablecoin][e.msg.sender];

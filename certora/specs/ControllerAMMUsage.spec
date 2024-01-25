@@ -120,6 +120,7 @@ function AMM_withdraw(address user, uint256 frac) returns uint256[2] {
 }
 
 function AMM_deposit_range(address user, uint256 amount, int256 n1, int256 n2) {
+    assert n1 <= n2;
     deposited_collateral = deposited_collateral + amount;
 }
 

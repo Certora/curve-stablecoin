@@ -672,6 +672,23 @@ rule exchange_dy_bad_trade {
     satisfy traded[0] == 3 && traded[1] == 2;
 }
 
+rule get_rate_equals_set_rate {
+    env e1;
+    env e2;
+    env e3;
+    uint256 somerate;
+
+    require e1.block.timestamp == e2.block.timestamp;
+    require e2.block.timestamp == e3.block.timestamp;
+
+    uint256 current_rate_mul = get_rate_mul(e1);
+    uint256 set_rate_result = set_rate(e2, somerate);
+    uint256 after_rate_mul = get_rate_mul(e1);
+
+    assert current_rate_mul == set_rate_result;
+    assert current_rate_mul == after_rate_mul;
+}
+
 /*
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_amount: uint256, _for: address = msg.sender) -> uint256[2]:
     """
