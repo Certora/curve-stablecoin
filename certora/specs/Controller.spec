@@ -116,7 +116,7 @@ methods {
 
     // Controller heavy math:
     function _._calculate_debt_n1(uint256, uint256, uint256) external => NONDET;
-    function FactoryMock.log2(uint256 _x) external returns int256 => logTwo(_x);
+    function _.log2(uint256 _x) external => logTwo(_x) expect int256;
 
     // AMM - LMGauge:
     function _.callback_collateral_shares(int256, uint256[]) external => NONDET;
@@ -138,7 +138,7 @@ function transferFromSummary(address token, address from, address to, uint256 am
 ghost address factoryAdmin;
 ghost address feeReceiver;
 ghost mathint sumAllDebt;
-persistent ghost uint256 nLoans { init_state axiom nLoans == 0; }
+ghost uint256 nLoans { init_state axiom nLoans == 0; }
 ghost mathint total_x { init_state axiom total_x == 0; }
 ghost mathint total_y { init_state axiom total_y == 0; }
 
@@ -181,7 +181,7 @@ invariant liquidity_on_collateral()
 // ghost mapping(address => uint256) loansInitialDebt {
 //     init_state axiom forall address user . loansInitialDebt[user] == 0;
 // }
-persistent ghost mapping(address => uint256) loansInitialDebt {
+ghost mapping(address => uint256) loansInitialDebt {
     init_state axiom forall address user . loansInitialDebt[user] == 0;
 }
 
@@ -193,7 +193,7 @@ ghost mapping(uint256 => address) loansMirror {
     init_state axiom forall uint256 indx . loansMirror[indx] == 0;
 }
 
-persistent ghost mapping(address => uint256) loansIxMirror {
+ghost mapping(address => uint256) loansIxMirror {
     init_state axiom forall address user . loansIxMirror[user] == 0;
 }
 
@@ -492,10 +492,6 @@ rule anyPositionCanBeClosed(method f, address user)
     satisfy debtAfter == 0;
 }
 
-/***********************************/
-/*       NOT PASSING RULES         */
-/***********************************/
-
 rule integrityOfRepay(uint256 debtToRepay, address _for, int256 max_active_band, bool use_eth) {
     env e;
     require e.msg.sender != currentContract && e.msg.sender != amm && _for != amm;
@@ -529,6 +525,7 @@ rule integrityOfRepay(uint256 debtToRepay, address _for, int256 max_active_band,
         assert collateralBalanceAfter == collateralBalanceBefore;
     } else {
         // we repay everything.  There is no loan afterwards and the collateral moved from the AMM to _for.
+        assert stable_withdrawn_from_AMM > 0 => e.msg.sender == _for;
         assert debtAfter == 0;
         assert stablecoinBalanceAfter == stablecoinBalanceBefore - debtBefore + stable_withdrawn_from_AMM;
         assert collateralBalanceAfter == collateralBalanceBefore + collateral_withdrawn_from_AMM;
@@ -536,32 +533,107 @@ rule integrityOfRepay(uint256 debtToRepay, address _for, int256 max_active_band,
         assert ammStablecoinBalanceAfter == ammStablecoinBalanceBefore - stable_withdrawn_from_AMM;
         assert ammCollateralBalanceAfter == ammCollateralBalanceBefore - collateral_withdrawn_from_AMM;
     }
-    satisfy true;
 }
+
+rule integrityOfRepayExtended(address callbacker, uint256[] callback_args) {
+    env e;
+    require e.msg.sender != currentContract && e.msg.sender != amm;
+    require callbacker != currentContract && callbacker != amm && callbacker != e.msg.sender;
+    mathint debtBefore = debt(e, e.msg.sender);
+    mathint callbackerStablecoinBalanceBefore = tokenBalance[stablecoin][callbacker];
+    mathint stablecoinBalanceBefore = tokenBalance[stablecoin][e.msg.sender];
+    mathint ammStablecoinBalanceBefore = tokenBalance[stablecoin][amm];
+    mathint callbackerCollateralBalanceBefore = tokenBalance[collateraltoken][callbacker];
+    mathint collateralBalanceBefore = tokenBalance[collateraltoken][e.msg.sender];
+    mathint ammCollateralBalanceBefore = tokenBalance[collateraltoken][amm];
+    mathint redeemedBefore = redeemed();
+
+    stable_withdrawn_from_AMM = 0;
+    collateral_withdrawn_from_AMM = 0;
+
+    repay_extended(e, callbacker, callback_args);
+
+    mathint debtAfter = debt(e, e.msg.sender);
+    mathint callbackerStablecoinBalanceAfter = tokenBalance[stablecoin][callbacker];
+    mathint stablecoinBalanceAfter = tokenBalance[stablecoin][e.msg.sender];
+    mathint ammStablecoinBalanceAfter = tokenBalance[stablecoin][amm];
+    mathint callbackerCollateralBalanceAfter = tokenBalance[collateraltoken][callbacker];
+    mathint collateralBalanceAfter = tokenBalance[collateraltoken][e.msg.sender];
+    mathint ammCollateralBalanceAfter = tokenBalance[collateraltoken][amm];
+    mathint redeemedAfter = redeemed();
+
+    if (debtAfter > 0) {
+        // we do not repay everything.  The loan is lower but all collateral is still in AMM afterwards.
+        mathint debtToRepay = debtBefore - debtAfter;
+        assert debtToRepay > 0;
+        assert callbackerStablecoinBalanceAfter ==
+            callbackerStablecoinBalanceBefore - debtToRepay;
+        assert stablecoinBalanceAfter == stablecoinBalanceBefore;
+        assert redeemedAfter == redeemedBefore + debtToRepay;
+        // partial withdrawal only possible if not soft-liquidated, so no change there.
+        assert ammStablecoinBalanceAfter == ammStablecoinBalanceBefore;
+        assert stable_withdrawn_from_AMM == 0;
+        // collateral can be transferred from amm to callbacker or vice versa
+        // we check only that the sum stays the same
+        // the ControllerAMMUsage checks that the AMM balance is what was deposited/withdrawn.
+        assert ammCollateralBalanceAfter + callbackerCollateralBalanceAfter ==
+               ammCollateralBalanceBefore + callbackerCollateralBalanceBefore;
+        assert collateralBalanceAfter == collateralBalanceBefore;
+    } else {
+        // we repay everything.  There is no loan afterwards and the collateral/stablecoin moved from the AMM
+        // to msg.sender and callbacker.
+        assert debtAfter == 0;
+        assert callbackerStablecoinBalanceAfter + stablecoinBalanceAfter ==
+            callbackerStablecoinBalanceBefore + stablecoinBalanceBefore - debtBefore + stable_withdrawn_from_AMM;
+        assert callbackerCollateralBalanceAfter + collateralBalanceAfter ==
+            callbackerCollateralBalanceBefore + collateralBalanceBefore + collateral_withdrawn_from_AMM;
+        assert redeemedAfter == redeemedBefore + debtBefore;
+        assert ammStablecoinBalanceAfter == ammStablecoinBalanceBefore - stable_withdrawn_from_AMM;
+        assert ammCollateralBalanceAfter == ammCollateralBalanceBefore - collateral_withdrawn_from_AMM;
+    }
+}
+
+/***********************************/
+/*       NOT PASSING RULES         */
+/***********************************/
 
 rule repayCumulative(uint256 debtToRepay1, uint256 debtToRepay2, address _for, int256 max_active_band, bool use_eth) {
     env e;
     require debtToRepay1 + debtToRepay2 < max_uint256;
     uint256 combinedDebtToRepay = assert_uint256(debtToRepay1 + debtToRepay2);
 
+    stable_withdrawn_from_AMM = 0;
+    collateral_withdrawn_from_AMM = 0;
+
     storage initialStorage = lastStorage;
 
     repay(e, debtToRepay1, _for, max_active_band, use_eth);
     repay(e, debtToRepay2, _for, max_active_band, use_eth);
 
-    mathint debtSeperate = get_initial_debt(_for);
-    mathint stablecoinBalanceSeperate = stablecoin.balanceOf(e.msg.sender);
-    mathint redeemedSeperate = redeemed();
+    mathint debtSeparate = debt(_for);
+    mathint stablecoinBalanceSeparate = tokenBalance[stablecoin][e.msg.sender];
+    mathint collateralBalanceSeparate = tokenBalance[collateraltoken][_for];
+    mathint redeemedSeparate = redeemed();
+    mathint stablecoinWithdrawnSeparate = stable_withdrawn_from_AMM;
+    mathint collateralWithdrawnSeparate = collateral_withdrawn_from_AMM;
 
     repay(e, combinedDebtToRepay, _for, max_active_band, use_eth) at initialStorage;
 
-    mathint debtCombined = get_initial_debt(_for);
-    mathint stablecoinBalanceCombined = stablecoin.balanceOf(e.msg.sender);
+    mathint debtCombined = debt(_for);
+    mathint stablecoinBalanceCombined = tokenBalance[stablecoin][e.msg.sender];
+    mathint collateralBalanceCombined = tokenBalance[collateraltoken][_for];
     mathint redeemedCombined = redeemed();
+    mathint stablecoinWithdrawnCombined = stable_withdrawn_from_AMM;
+    mathint collateralWithdrawnCombined = collateral_withdrawn_from_AMM;
 
-    assert debtSeperate == debtCombined;
-    assert stablecoinBalanceSeperate == stablecoinBalanceCombined;
-    assert redeemedSeperate == redeemedCombined;
+    assert debtSeparate == debtCombined;
+    assert redeemedSeparate == redeemedCombined;
+
+    // since we summarized withdraw we have to assume that AMM returns the same result here
+    require stablecoinWithdrawnSeparate == stablecoinWithdrawnCombined;
+    require collateralWithdrawnSeparate == collateralWithdrawnCombined;
+    assert stablecoinBalanceSeparate == stablecoinBalanceCombined;
+    assert collateralBalanceSeparate == collateralBalanceCombined;
 }
 
 // should work only with liquidate_extended (when partially liquidating)
@@ -576,12 +648,12 @@ rule liquidateCumulative(address user, uint256 min_x1, uint256 min_x2, bool use_
     liquidate(e, user, min_x2, use_eth);
 
     mathint liquidatorStableCoinBalanceSeperate = stablecoin.balanceOf(e.msg.sender);
-    mathint debtSeperate = get_initial_debt(user);
+    mathint debtSeperate = debt(user);
 
     liquidate(e, user, combinedMinX, use_eth) at initialStorage;
 
     mathint liquidatorStableCoinBalanceCombined = stablecoin.balanceOf(e.msg.sender);
-    mathint debtCombined = get_initial_debt(user);
+    mathint debtCombined = debt(user);
 
     assert liquidatorStableCoinBalanceSeperate == liquidatorStableCoinBalanceCombined;
     assert debtSeperate == debtCombined;

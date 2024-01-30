@@ -15,6 +15,7 @@ methods {
     function bands_y(int256 n) external returns uint256 envfree;
     function read_user_tick_numbers(address) external returns int256[2] envfree;
     function liquidity_mining_callback() external returns address envfree;
+    function has_liquidity(address) external returns bool envfree;
 
 
     // STABLECOIN:
@@ -234,10 +235,12 @@ rule withdraw_all_user_shares(address user) {
 
     env e;
     uint256[2] amounts;
+    bool liquidity_before = has_liquidity(user);
     bool valid_before = user_ticks_valid(user);
     amounts = withdraw(e, user, 10^18);
     bool valid_after = user_ticks_valid(user);
     assert valid_before && !valid_after;
+    assert liquidity_before && !has_liquidity(user);
 }
 
 rule withdraw_some_user_shares(address user) {
@@ -245,11 +248,13 @@ rule withdraw_some_user_shares(address user) {
     env e;
     uint256 frac;
     uint256[2] amounts;
+    bool liquidity_before = has_liquidity(user);
     bool valid_before = user_ticks_valid(user);
     require frac != 10^18;
     amounts = withdraw(e, user, frac);
     bool valid_after = user_ticks_valid(user);
     assert valid_before && valid_after;
+    assert liquidity_before && has_liquidity(user);
 }
 
 rule deposit_some_user_shares(address user, uint256 amount, int256 n1, int256 n2) {
