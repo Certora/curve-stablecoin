@@ -1344,3 +1344,7 @@ def get_liquidation_discounts(user: address) -> uint256:
 def increaseDiscount(user: address, amount: uint256):
     current_discount: uint256 = self.liquidation_discounts[user]
     self.liquidation_discounts[user] = current_discount + amount
+
+@external
+def get_f_remove(frac: uint256, health_limit: uint256) -> uint256:
+    return self._get_f_remove(frac, health_limit)

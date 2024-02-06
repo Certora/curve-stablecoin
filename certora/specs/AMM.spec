@@ -1,10 +1,8 @@
-using Stablecoin as stablecoin;
-using CollateralToken as collateraltoken;
-
-
 methods {
     function total_shares(int256) external returns uint256 envfree;
     function admin() external returns address envfree;
+    function BORROWED_TOKEN() external returns address envfree;
+    function COLLATERAL_TOKEN() external returns address envfree;
     function BORROWED_PRECISION() external returns uint256 envfree;
     function COLLATERAL_PRECISION() external returns uint256 envfree;
     function active_band() external returns int256 envfree;
@@ -16,23 +14,26 @@ methods {
     function read_user_tick_numbers(address) external returns int256[2] envfree;
     function liquidity_mining_callback() external returns address envfree;
     function has_liquidity(address) external returns bool envfree;
-
-
-    // STABLECOIN:
-    function Stablecoin.balanceOf(address) external returns (uint256) envfree;
-    function Stablecoin.totalSupply() external returns (uint256) envfree;
-
-    // CollateralToken:
-    function CollateralToken.balanceOf(address) external returns (uint256) envfree;
-    function CollateralToken.totalSupply() external returns (uint256) envfree;
+    function admin_fees_x() external returns uint256 envfree;
+    function admin_fees_y() external returns uint256 envfree;
 
     //
     function _.price_w() external => CONSTANT;
+    function _.balanceOf(address account) external => require_uint256(tokenBalance[calledContract][account]) expect uint256;
+    function _.approve(address spender, uint256 amount) external with (env e) => approveSummary(calledContract, e.msg.sender, spender, amount) expect bool;
     function _.transfer(address to, uint256 amount) external with (env e) => transferFromSummary(calledContract, e.msg.sender, to, amount) expect bool;
     function _.transferFrom(address from, address to, uint256 amount) external => transferFromSummary(calledContract, from, to, amount) expect bool;
 }
 
 ghost mapping(address => mapping(address => mathint)) tokenBalance;
+ghost mapping(address => mapping(address => mapping(address => mathint))) tokenApprovals {
+    init_state axiom (forall address token. forall address spender. tokenApprovals[token][currentContract][spender] == 0);
+}
+
+function approveSummary(address token, address from, address spender, uint256 amount) returns bool {
+    tokenApprovals[token][from][spender] = amount;
+    return true;
+}
 
 function transferFromSummary(address token, address from, address to, uint256 amount) returns bool {
     require tokenBalance[token][from] >= to_mathint(amount);
@@ -40,6 +41,23 @@ function transferFromSummary(address token, address from, address to, uint256 am
     tokenBalance[token][to] = tokenBalance[token][to] + amount;
     return true;
 }
+
+definition changes_totalxy(method f) returns bool = (
+        f.selector == sig:withdraw(address, uint256).selector ||
+        f.selector == sig:deposit_range(address, uint256, int256, int256).selector ||
+        f.selector == sig:reset_admin_fees().selector ||
+        f.selector == sig:exchange(uint256, uint256, uint256, uint256).selector ||
+        f.selector == sig:exchange(uint256, uint256, uint256, uint256, address).selector ||
+        f.selector == sig:exchange_dy(uint256, uint256, uint256, uint256).selector ||
+        f.selector == sig:exchange_dy(uint256, uint256, uint256, uint256, address).selector
+    );
+
+definition changes_balance(method f) returns bool = (
+        f.selector == sig:exchange(uint256, uint256, uint256, uint256).selector ||
+        f.selector == sig:exchange(uint256, uint256, uint256, uint256, address).selector ||
+        f.selector == sig:exchange_dy(uint256, uint256, uint256, uint256).selector ||
+        f.selector == sig:exchange_dy(uint256, uint256, uint256, uint256, address).selector
+    );
 
 ghost mapping(address => int256) user_ns {
     init_state axiom (forall address user. user_ns[user] == 0);
@@ -123,6 +141,9 @@ hook Sload uint256 packed user_shares[KEY address user].ticks[INDEX uint256 inde
     require user_ticks_packed[user][index] == packed;
 }
 
+invariant only_admin_approved(address token, address spender)
+    tokenApprovals[token][currentContract][spender] > 0 => spender == 0 || spender == admin();
+
 invariant total_shares_match(int256 n)
     total_shares_ghost[n] == to_mathint(total_shares(n))
 {
@@ -204,6 +225,20 @@ rule withdraw_removes_from_bands(address user, uint256 frac) {
     mathint removed_y = total_y_before - total_y;
     assert amount_x * BORROWED_PRECISION() <= removed_x && removed_x < (amount_x + 2 * num_bands) * BORROWED_PRECISION();
     assert amount_y * COLLATERAL_PRECISION() <= removed_y && removed_y < (amount_y + 2 * num_bands) * COLLATERAL_PRECISION();
+}
+
+rule reset_admin_fees_removes_from_total() {
+    env e;
+    mathint admin_fees_x_before = admin_fees_x();
+    mathint admin_fees_y_before = admin_fees_y();
+    mathint total_x_before = total_x;
+    mathint total_y_before = total_y;
+    reset_admin_fees(e);
+
+    mathint removed_x = total_x_before - total_x;
+    mathint removed_y = total_y_before - total_y;
+    assert removed_x == admin_fees_x_before * BORROWED_PRECISION();
+    assert removed_y == admin_fees_y_before * COLLATERAL_PRECISION();
 }
 
 rule withdraw_when_not_in_softliquidation(address user, uint256 frac) {
@@ -407,6 +442,8 @@ rule totalSharesToBandsYShouldBeConstantOnDepositRange(address user, uint256 amo
 // e.msg.sender sends coins, _for gets coins
 rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount, address _for) {
     env e;
+    address stablecoin = BORROWED_TOKEN();
+    address collateraltoken = COLLATERAL_TOKEN();
 
     require (i == 0 && j == 1) || (i == 1 && j == 0);
     // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
@@ -480,6 +517,8 @@ rule integrityOfExchange_balance(uint256 i, uint256 j, uint256 in_amount, uint25
 
 rule integrityOfExchangeDY_balance(uint256 i, uint256 j, uint256 out_amount, uint256 max_amount, address _for) {
     env e;
+    address stablecoin = BORROWED_TOKEN();
+    address collateraltoken = COLLATERAL_TOKEN();
 
     require (i == 0 && j == 1) || (i == 1 && j == 0);
     // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
@@ -572,6 +611,8 @@ rule exchangeDoesNotChangeUserShares(uint256 i, uint256 j, uint256 in_amount, ui
 
 rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 min_amount, address _for) {
     env e;
+    address stablecoin = BORROWED_TOKEN();
+    address collateraltoken = COLLATERAL_TOKEN();
 
     require (i == 0 && j == 1) || (i == 1 && j == 0);
     // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
@@ -609,6 +650,8 @@ rule integrityOfExchange_bands(uint256 i, uint256 j, uint256 in_amount, uint256 
 
 rule integrityOfExchangeDY_bands(uint256 i, uint256 j, uint256 out_amount, uint256 max_amount, address _for) {
     env e;
+    address stablecoin = BORROWED_TOKEN();
+    address collateraltoken = COLLATERAL_TOKEN();
 
     require (i == 0 && j == 1) || (i == 1 && j == 0);
     // the rule only holds if the liquidity mining callback doesn't mess up balances; we assume here that there is none.
@@ -692,6 +735,38 @@ rule get_rate_equals_set_rate {
 
     assert current_rate_mul == set_rate_result;
     assert current_rate_mul == after_rate_mul;
+}
+
+rule admin_cannot_change_once_set(method f, env e, calldataarg arg) {
+    address adminBefore = admin();
+    require adminBefore != 0;
+
+    f(e, arg);
+
+    assert admin() == adminBefore;
+}
+
+rule cannot_change_totalxy(method f, env e, calldataarg arg) filtered {
+    f -> !changes_totalxy(f)
+} {
+    mathint total_x_before = total_x;
+    mathint total_y_before = total_y;
+
+    f(e, arg);
+
+    assert total_x == total_x_before;
+    assert total_y == total_y_before;
+}
+
+rule cannot_change_balance(method f, env e, calldataarg arg) filtered {
+    f -> !changes_balance(f)
+} {
+    address token;
+    mathint balanceBefore = tokenBalance[token][currentContract];
+
+    f(e, arg);
+
+    assert balanceBefore == tokenBalance[token][currentContract];
 }
 
 /*
