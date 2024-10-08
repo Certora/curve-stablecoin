@@ -169,11 +169,11 @@ function AMM_withdraw(address user, uint256 frac) returns uint256[2] {
     return withdrawn;
 }
 
-hook Sstore AMM.bands_x[KEY int256 n] uint256 newValue (uint256 oldValue) STORAGE {
+hook Sstore AMM.bands_x[KEY int256 n] uint256 newValue (uint256 oldValue) {
     total_x = total_x - oldValue + newValue;
 }
 
-hook Sstore AMM.bands_y[KEY int256 n] uint256 newValue (uint256 oldValue) STORAGE {
+hook Sstore AMM.bands_y[KEY int256 n] uint256 newValue (uint256 oldValue) {
     total_y = total_y - oldValue + newValue;
 }
 
@@ -206,44 +206,44 @@ ghost mapping(uint256 => int256) log2Sum;
 //    axiom ((forall uint256 index1 . forall uint256 index2 . index1 <= index2 => log2Sum[index1] <= log2Sum[index2]) && log2Sum[1] == 0 && log2Sum[2] == 1);
 // }
 
-hook Sstore loans[INDEX uint256 indx] address newUser (address oldUser) STORAGE {
+hook Sstore loans[INDEX uint256 indx] address newUser (address oldUser) {
     loansMirror[indx] = newUser;
 }
 
-hook Sload address user loans[INDEX uint256 indx] STORAGE {
+hook Sload address user loans[INDEX uint256 indx] {
     require  loansMirror[indx] == user;
 }
 
-hook Sstore loan_ix[KEY address user] uint256 newIndex (uint256 oldIndex) STORAGE {
+hook Sstore loan_ix[KEY address user] uint256 newIndex (uint256 oldIndex) {
     loansIxMirror[user] = newIndex;
 }
 
-hook Sload uint256 loanIndex loan_ix[KEY address user] STORAGE {
+hook Sload uint256 loanIndex loan_ix[KEY address user] {
     require  loansIxMirror[user] == loanIndex;
 }
 
-hook Sstore n_loans uint256 newNLoans (uint256 oldNLoans) STORAGE {
+hook Sstore n_loans uint256 newNLoans (uint256 oldNLoans) {
     nLoans = newNLoans;
 }
 
-hook Sload uint256 value n_loans STORAGE {
+hook Sload uint256 value n_loans {
     require nLoans == value;
 }
 
-hook Sstore loan[KEY address user].initial_debt uint256 newInitialDebt (uint256 oldInitialDebt) STORAGE {
+hook Sstore loan[KEY address user].initial_debt uint256 newInitialDebt (uint256 oldInitialDebt) {
     sumAllDebt = sumAllDebt - oldInitialDebt + newInitialDebt;
     loansInitialDebt[user] = newInitialDebt;
 }
 
-hook Sload uint256 initialDebt loan[KEY address user].initial_debt STORAGE {
+hook Sload uint256 initialDebt loan[KEY address user].initial_debt {
     require  loansInitialDebt[user] == initialDebt;
 }
 
-hook Sstore loan[KEY address user].rate_mul uint256 newRateMul (uint256 oldRateMul) STORAGE {
+hook Sstore loan[KEY address user].rate_mul uint256 newRateMul (uint256 oldRateMul) {
     loansRateMul[user] = newRateMul;
 }
 
-hook Sload uint256 newRateMul loan[KEY address user].rate_mul STORAGE {
+hook Sload uint256 newRateMul loan[KEY address user].rate_mul {
     require  loansRateMul[user] == newRateMul;
 }
 

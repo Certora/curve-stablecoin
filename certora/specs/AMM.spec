@@ -80,23 +80,23 @@ ghost mapping(mathint => mathint) total_shares_ghost {
 ghost mathint total_x { init_state axiom total_x == 0; }
 ghost mathint total_y { init_state axiom total_y == 0; }
 
-hook Sstore admin_fees_x uint256 newValue (uint256 oldValue) STORAGE {
+hook Sstore admin_fees_x uint256 newValue (uint256 oldValue) {
     total_x = total_x + (newValue - oldValue) * BORROWED_PRECISION();
 }
 
-hook Sstore bands_x[KEY int256 n] uint256 newValue (uint256 oldValue) STORAGE {
+hook Sstore bands_x[KEY int256 n] uint256 newValue (uint256 oldValue) {
     total_x = total_x - oldValue + newValue;
 }
 
-hook Sstore admin_fees_y uint256 newValue (uint256 oldValue) STORAGE {
+hook Sstore admin_fees_y uint256 newValue (uint256 oldValue) {
     total_y = total_y + (newValue - oldValue) * COLLATERAL_PRECISION();
 }
 
-hook Sstore bands_y[KEY int256 n] uint256 newValue (uint256 oldValue) STORAGE {
+hook Sstore bands_y[KEY int256 n] uint256 newValue (uint256 oldValue) {
     total_y = total_y - oldValue + newValue;
 }
 
-hook Sstore user_shares[KEY address user].ns int256 newPacked (int256 oldPacked) STORAGE {
+hook Sstore user_shares[KEY address user].ns int256 newPacked (int256 oldPacked) {
     user_ns[user] = newPacked;
 
     mathint n1 = newPacked % 2^128;
@@ -113,11 +113,11 @@ hook Sstore user_shares[KEY address user].ns int256 newPacked (int256 oldPacked)
     user_n2[user] = realn2;
 }
 
-hook Sload int256 packed user_shares[KEY address user].ns STORAGE {
+hook Sload int256 packed user_shares[KEY address user].ns {
     require user_ns[user] == packed;
 }
 
-hook Sstore user_shares[KEY address user].ticks[INDEX uint256 index] uint256 newPacked (uint256 oldPacked) STORAGE {
+hook Sstore user_shares[KEY address user].ticks[INDEX uint256 index] uint256 newPacked (uint256 oldPacked) {
     user_ticks_packed[user][index] = newPacked;
     if (newPacked == 0 && index == 0) {
         // clear all ticks for current user
@@ -137,7 +137,7 @@ hook Sstore user_shares[KEY address user].ticks[INDEX uint256 index] uint256 new
     }
 }
 
-hook Sload uint256 packed user_shares[KEY address user].ticks[INDEX uint256 index] STORAGE {
+hook Sload uint256 packed user_shares[KEY address user].ticks[INDEX uint256 index] {
     require user_ticks_packed[user][index] == packed;
 }
 
